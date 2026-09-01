@@ -3,10 +3,8 @@
 ## Project Description
 Task Management API is a lightweight, scalable FastAPI application created as part of the Triton Internship project. This repository provides a modern Python backend structure for task management operations.
 
-> **Note**: This repository currently represents the initial project setup and baseline application foundation. Core task management features (models, schemas, and endpoints) will be implemented in upcoming development phases.
-
 ## Current Objective
-The goal of this phase is to establish a verified, modular Python package structure with ASGI application setup (`FastAPI` + `Uvicorn`), configuration management via `pydantic-settings`, environment isolation, and version control configuration (`.gitignore`).
+Demonstrate production-ready modular Python software architecture by separating application logic into distinct, single-responsibility modules (models, schemas, services, utilities, and tests) while keeping `main.py` lightweight.
 
 ## Technologies Used
 - **Language**: Python 3.13+
@@ -17,25 +15,72 @@ The goal of this phase is to establish a verified, modular Python package struct
 ## Project Structure
 ```text
 task-management-api/
+│
 ├── app/
 │   ├── __init__.py
 │   ├── main.py
 │   ├── config.py
+│   │
 │   ├── models/
-│   │   └── __init__.py
+│   │   ├── __init__.py
+│   │   ├── user.py
+│   │   └── task.py
+│   │
 │   ├── schemas/
-│   │   └── __init__.py
+│   │   ├── __init__.py
+│   │   ├── user.py
+│   │   └── task.py
+│   │
 │   ├── services/
-│   │   └── __init__.py
+│   │   ├── __init__.py
+│   │   ├── user_service.py
+│   │   └── task_service.py
+│   │
 │   └── utils/
-│       └── __init__.py
+│       ├── __init__.py
+│       ├── validators.py
+│       └── helpers.py
+│
 ├── tests/
-│   └── __init__.py
+│   ├── __init__.py
+│   ├── test_users.py
+│   ├── test_tasks.py
+│   └── test_validators.py
+│
 ├── requirements.txt
 ├── .gitignore
 ├── README.md
 └── .env.example
 ```
+
+## Modular Python Architecture
+
+### Why Divide into Modules?
+Monolithic single-file applications become difficult to test, maintain, and scale as team size and codebase complexity grow. Dividing code into modular Python components enforces the **Single Responsibility Principle (SRP)**, improves code readability, prevents code duplication, and enables independent unit testing of business logic.
+
+### Module Responsibilities
+
+1. **User Management**:
+   - `app/models/user.py`: Internal `User` data structure entity.
+   - `app/schemas/user.py`: Pydantic request/response schemas (`UserCreate`, `UserResponse`).
+   - `app/services/user_service.py`: Core user business logic and in-memory persistence (`create_user`, `get_user`, `get_users`).
+   - `tests/test_users.py`: Unit tests for user service operations.
+
+2. **Task Management**:
+   - `app/models/task.py`: Internal `Task` data structure entity.
+   - `app/schemas/task.py`: Pydantic request/response schemas (`TaskCreate`, `TaskUpdate`, `TaskResponse`).
+   - `app/services/task_service.py`: Core task business logic and in-memory persistence (`create_task`, `get_task`, `get_tasks`, `update_task_completion`).
+   - `tests/test_tasks.py`: Unit tests for task service operations.
+
+3. **Validation**:
+   - `app/utils/validators.py`: Reusable validation functions for email format (`validate_email`) and task titles (`validate_task_title`).
+   - `tests/test_validators.py`: Unit tests verifying validation logic.
+
+4. **Utility Functions**:
+   - `app/utils/helpers.py`: Reusable generic helpers (ISO timestamp generation via `get_current_timestamp` and sequential ID generation via `generate_id`).
+
+5. **Lightweight Entry Point (`app/main.py`)**:
+   - `app/main.py` serves strictly as the HTTP routing layer. It defines FastAPI endpoints, parses HTTP request payloads, delegates business logic directly to `user_service` and `task_service`, and maps exceptions to HTTP error status codes. Keeping `main.py` lightweight ensures that business logic remains decoupled from HTTP framework specifics.
 
 ## Setup & Installation
 
@@ -63,9 +108,16 @@ Install all required packages from `requirements.txt`:
 pip install -r requirements.txt
 ```
 
+## Running Tests
+
+Run the unit test suite:
+```bash
+python -m unittest discover tests
+```
+
 ## Running the Application
 
-Start the local development server with auto-reloading enabled:
+Start the local development server:
 ```bash
 uvicorn app.main:app --reload
 ```
@@ -73,32 +125,26 @@ uvicorn app.main:app --reload
 The server will start at `http://127.0.0.1:8000`.
 
 ### Key Endpoints
-- **API Root**: [http://127.0.0.1:8000/](http://127.0.0.1:8000/) - Basic welcome and health check response.
-- **Interactive API Docs (Swagger UI)**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-- **Alternative API Docs (ReDoc)**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
+- **API Root**: [http://127.0.0.1:8000/](http://127.0.0.1:8000/)
+- **Users Endpoints**:
+  - `POST /users`: Create user
+  - `GET /users`: List users
+  - `GET /users/{user_id}`: Retrieve user
+- **Tasks Endpoints**:
+  - `POST /tasks`: Create task
+  - `GET /tasks`: List tasks
+  - `GET /tasks/{task_id}`: Retrieve task
+  - `PATCH /tasks/{task_id}/complete`: Update task completion
+- **Interactive Docs**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 ## Environment Variables
 
-Environment settings are loaded via `pydantic-settings` in `app/config.py`.
+Environment settings are managed via `pydantic-settings` in `app/config.py`.
 
-To set custom environment settings:
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-2. Adjust environment settings in `.env` as needed.
+Copy `.env.example` to `.env` to configure local variables:
+```bash
+cp .env.example .env
+```
 
 ### Security Warning
 > **IMPORTANT**: Never commit real secrets, API keys, passwords, or `.env` files to Git repositories. Ensure `.env` remains listed in `.gitignore` at all times.
-
-## Git Workflow
-1. Development should take place on dedicated feature branches (e.g., `feature/project-setup`).
-2. Verify that untracked secrets or `.venv/` directories are not staged prior to committing:
-   ```bash
-   git status
-   ```
-3. Commit clean code changes with descriptive messages:
-   ```bash
-   git add .
-   git commit -m "feat: initial project setup and FastAPI ASGI configuration"
-   ```
