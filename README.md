@@ -34,7 +34,9 @@ task-management-api/
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── user_service.py
-│   │   └── task_service.py
+│   │   ├── task_service.py
+│   │   ├── pipeline.py
+│   │   └── pipeline_stages.py
 │   │
 │   └── utils/
 │       ├── __init__.py
@@ -45,7 +47,8 @@ task-management-api/
 │   ├── __init__.py
 │   ├── test_users.py
 │   ├── test_tasks.py
-│   └── test_validators.py
+│   ├── test_validators.py
+│   └── test_pipeline.py
 │
 ├── requirements.txt
 ├── .gitignore
@@ -81,6 +84,44 @@ Monolithic single-file applications become difficult to test, maintain, and scal
 
 5. **Lightweight Entry Point (`app/main.py`)**:
    - `app/main.py` serves strictly as the HTTP routing layer. It defines FastAPI endpoints, parses HTTP request payloads, delegates business logic directly to `user_service` and `task_service`, and maps exceptions to HTTP error status codes. Keeping `main.py` lightweight ensures that business logic remains decoupled from HTTP framework specifics.
+
+6. **D3 — Pipeline & Object-Oriented Architecture (`app/services/pipeline.py`, `app/services/pipeline_stages.py`)**:
+   - `PipelineStage`: Abstract base class enforcing stage processing contract (`process`).
+   - `TaskValidationStage`, `TaskTransformationStage`, `TaskProcessingStage`: Concrete stage implementations.
+   - `Pipeline`: Sequential stage execution engine.
+   - `tests/test_pipeline.py`: Comprehensive test suite verifying pipeline flow and stage interchangeability.
+
+## D3 — Object-Oriented Programming & Pipeline Architecture
+
+### Overview
+D3 implements Object-Oriented Programming (OOP) concepts and a reusable data processing pipeline (`app/services/pipeline.py` & `app/services/pipeline_stages.py`) designed to process task data sequentially across independent stages.
+
+### Data Flow
+Data flows sequentially through discrete stages, where the output of one stage serves directly as input to the next:
+
+```text
+Task Input → Validation → Transformation → Processing → Output
+```
+
+### OOP Concepts Demonstrated
+- **Abstraction**: `PipelineStage` serves as an abstract base class (`abc.ABC`) defining the required `process(data: Dict[str, Any]) -> Dict[str, Any]` interface contract.
+- **Encapsulation**: Each stage class encapsulates its internal configuration parameters (`_title_required`, `_default_completed`, `_status_label`) and processing logic while maintaining dictionary immutability (`data.copy()`).
+- **Inheritance**: Concrete stages (`TaskValidationStage`, `TaskTransformationStage`, `TaskProcessingStage`) inherit directly from `PipelineStage`.
+- **Polymorphism**: The `Pipeline` class executes any stage implementing `PipelineStage` uniformly, allowing stages to be interchanged or customized dynamically.
+
+### Purpose of PipelineStage & Task Pipeline Stages
+1. **`PipelineStage`**: Abstract base class establishing a consistent blueprint for all processing stages.
+2. **`TaskValidationStage`**: Validates task input structure and task title length (1–100 chars), reusing `validate_task_title`.
+3. **`TaskTransformationStage`**: Normalizes task title whitespace and ensures default completion status (`completed=False`).
+4. **`TaskProcessingStage`**: Enriches task data with processing metadata (`status="PROCESSED"`, `processed=True`).
+
+### Sequential Execution in `Pipeline` Class
+The `Pipeline` class maintains an ordered list of `PipelineStage` objects. When `run(data)` is invoked, it iterates through the stages sequentially, passing the output of stage $i$ as the input to stage $i+1$, returning the final processed result.
+
+### Benefits of Class-Based Stage Separation
+- **Single Responsibility Principle (SRP)**: Each stage performs one specific data processing task.
+- **Reusability & Interchangeability**: Stages can be reused in different pipelines or swapped out independently.
+- **Maintainability**: Stages can be modified or tested in isolation without affecting other pipeline components.
 
 ## Setup & Installation
 
