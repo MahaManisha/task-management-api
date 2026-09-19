@@ -91,6 +91,14 @@ Monolithic single-file applications become difficult to test, maintain, and scal
    - `Pipeline`: Sequential step execution engine using composition over inheritance.
    - `tests/test_pipeline.py`: Comprehensive test suite verifying step interchangeability, runtime swapping, and extensibility.
 
+7. **D4 — Type Hints & Pydantic for Configuration (`app/config.py`, `scripts/config_validation_demo.py`, `tests/test_config.py`)**:
+   - `PipelineConfig`: Pydantic `BaseModel` enforcing runtime validation for pipeline settings.
+   - `ExecutionMode`, `ExecutionDevice`: Enums restricting execution choices.
+   - `ImageSize`: Nested Pydantic model validating pixel dimensions.
+   - `DataclassPipelineConfig`: Standard Python dataclass demonstrating the contrast between static types and Pydantic runtime validation.
+   - `scripts/config_validation_demo.py`: Executable demo script showing valid vs invalid configuration validation errors.
+   - `tests/test_config.py`: Unit test suite verifying runtime configuration validation.
+
 ## D3 — OOP for Pipelines: Composition Over Inheritance
 
 ### Overview
@@ -127,6 +135,59 @@ Task Input → Step 1 → Step 2 → Step 3 → Output
 - **Encapsulation**: Steps encapsulate configuration via protected attributes (`_title_required`, `_default_completed`, `_status_label`) and maintain input immutability via `data.copy()`.
 - **Inheritance**: Shallow inheritance tree where concrete steps inherit directly from `Step` without intermediate classes.
 - **Polymorphism**: `Pipeline` invokes `.process()` uniformly on all step instances without type checks (`if isinstance(...)` is strictly avoided).
+
+## D4 — Type Hints & Pydantic for Configuration
+
+### Overview
+D4 introduces runtime configuration validation using **Pydantic v2** (`app/config.py`), modern Python type hints, Enums, and a comparative demonstration against standard Python `@dataclass`.
+
+### Static Type Hints vs Runtime Validation
+- **Static Type Hints**: Tools like IDEs and `mypy` use type hints (`str`, `int`, `Optional[str]`, `list[str]`) during development for auto-completion and static analysis. However, standard Python type hints are **not** enforced at execution time.
+- **Runtime Validation**: **Pydantic** evaluates data dynamic upon object instantiation (`PipelineConfig(**data)`). If input values break constraints (e.g. wrong type, out-of-range value, non-existent path), Pydantic immediately raises a detailed `ValidationError`.
+
+### Dataclass vs Pydantic Runtime Validation
+- **Python `@dataclass`**: Provides a concise way to create structured Python data containers. However, standard dataclasses **do not** validate field types or values when instantiated. Invalid parameters (e.g. `batch_size=-100`) pass silently.
+- **Pydantic `BaseModel`**: Performs strict runtime type coercion and validator check evaluation (`@field_validator`) at creation time, rejecting invalid states immediately.
+
+### Pipeline Configuration Fields & Rules
+| Field | Type | Default | Validation Rules |
+| :--- | :--- | :--- | :--- |
+| `input_path` | `Path` | *Required* | Must exist on the filesystem (`Path.exists()`). |
+| `batch_size` | `int` | `32` | Must be an integer greater than zero (`batch_size > 0`). |
+| `image_size` | `ImageSize` | `224x224` | Width & height must be positive integers (`> 0`). |
+| `feature_columns` | `list[str]` | `["title", "description", "status"]` | Must contain at least one column string. |
+| `mode` | `ExecutionMode` (Enum) | `INFERENCE` | Must be one of `TRAIN`, `VALIDATE`, or `INFERENCE`. |
+| `device` | `ExecutionDevice` (Enum) | `CPU` | Must be one of `CPU`, `CUDA`, or `MPS`. |
+| `confidence_threshold` | `float` | `0.8` | Float value bounded strictly between `0.0` and `1.0`. |
+
+### Deliberately Invalid Configuration Examples
+Pydantic produces clear, specific validation error messages indicating **WHAT** is invalid, **WHERE** the problem is located, and **WHY** it was rejected:
+
+1. **Non-existent Path**:
+   - `WHERE`: Field `input_path`
+   - `WHY`: `Value error, input_path does not exist: 'non_existent_folder_xyz'`
+2. **Invalid Batch Size**:
+   - `WHERE`: Field `batch_size`
+   - `WHY`: `Value error, batch_size must be greater than 0`
+3. **Out-of-Range Threshold**:
+   - `WHERE`: Field `confidence_threshold`
+   - `WHY`: `Value error, confidence_threshold must be between 0.0 and 1.0`
+4. **Invalid Enum Choice**:
+   - `WHERE`: Field `mode`
+   - `WHY`: `Input should be 'TRAIN', 'VALIDATE' or 'INFERENCE'`
+
+### Running D4 Configuration Demo
+Run the interactive validation demonstration script:
+```bash
+python scripts/config_validation_demo.py
+```
+
+### Running D4 Configuration Tests
+Run the configuration unit tests:
+```bash
+python -m unittest tests/test_config.py -v
+```
+
 
 
 ## Setup & Installation
