@@ -86,42 +86,48 @@ Monolithic single-file applications become difficult to test, maintain, and scal
    - `app/main.py` serves strictly as the HTTP routing layer. It defines FastAPI endpoints, parses HTTP request payloads, delegates business logic directly to `user_service` and `task_service`, and maps exceptions to HTTP error status codes. Keeping `main.py` lightweight ensures that business logic remains decoupled from HTTP framework specifics.
 
 6. **D3 — Pipeline & Object-Oriented Architecture (`app/services/pipeline.py`, `app/services/pipeline_stages.py`)**:
-   - `PipelineStage`: Abstract base class enforcing stage processing contract (`process`).
-   - `TaskValidationStage`, `TaskTransformationStage`, `TaskProcessingStage`: Concrete stage implementations.
-   - `Pipeline`: Sequential stage execution engine.
-   - `tests/test_pipeline.py`: Comprehensive test suite verifying pipeline flow and stage interchangeability.
+   - `Step`: Abstract base class enforcing step processing contract (`process`).
+   - `TaskValidationStep`, `TaskTransformationStep`, `TaskProcessingStep`: Concrete step implementations.
+   - `Pipeline`: Sequential step execution engine using composition over inheritance.
+   - `tests/test_pipeline.py`: Comprehensive test suite verifying step interchangeability, runtime swapping, and extensibility.
 
-## D3 — Object-Oriented Programming & Pipeline Architecture
+## D3 — OOP for Pipelines: Composition Over Inheritance
 
 ### Overview
-D3 implements Object-Oriented Programming (OOP) concepts and a reusable data processing pipeline (`app/services/pipeline.py` & `app/services/pipeline_stages.py`) designed to process task data sequentially across independent stages.
+D3 implements Object-Oriented Programming (OOP) principles to construct a flexible task processing pipeline (`app/services/pipeline.py` & `app/services/pipeline_stages.py`) using **Composition Over Inheritance**. The `Pipeline` class contains interchangeable `Step` objects that execute sequentially.
 
 ### Data Flow
-Data flows sequentially through discrete stages, where the output of one stage serves directly as input to the next:
+Data flows sequentially through discrete steps, where the output of one step serves directly as input to the next:
 
 ```text
-Task Input → Validation → Transformation → Processing → Output
+Task Input → Step 1 → Step 2 → Step 3 → Output
 ```
 
+### Purpose of Step Interface & Task Steps
+1. **`Step`**: Abstract base class (`abc.ABC`) defining the shared `process(data: Dict[str, Any]) -> Dict[str, Any]` interface with `@abstractmethod`. Direct instantiation is prevented.
+2. **`TaskValidationStep`**: Validates task title presence and length (1–100 chars), reusing `validate_task_title`.
+3. **`TaskTransformationStep`**: Normalizes task title whitespace and ensures default completion status (`completed=False`).
+4. **`TaskProcessingStep`**: Enriches task data with processing metadata (`status="PROCESSED"`, `processed=True`).
+
+### Composition Over Inheritance
+- **Composition (`has-a`)**: The `Pipeline` class maintains a collection of `Step` objects (`self._steps`). It does not inherit from `Step` nor do steps inherit from `Pipeline`.
+- **Why Avoid Deep Inheritance Chains?**: Deep inheritance hierarchies create tight coupling, brittle code, and unintended side-effects when parent classes change. Composition keeps steps decoupled and independent.
+- **Runtime Step Swapping**: Because `Pipeline` interacts only with the abstract `Step` interface, any `Step` can be swapped for another at runtime without modifying the `Pipeline` class:
+  ```python
+  # Pipeline A uses TaskTransformationStep
+  pipeline_a = Pipeline(validation_step, transform_step, process_step)
+  
+  # Pipeline B swaps transform_step with priority_step at runtime
+  pipeline_b = Pipeline(validation_step, priority_step, process_step)
+  ```
+- **Extensibility Without Modification**: Adding a new step (e.g. `TaskTaggingStep` or `TaskPriorityStep`) requires creating a new subclass of `Step` and adding it to the pipeline using `pipeline.add_step(TaskTaggingStep())`. The `Pipeline` class implementation remains 100% untouched.
+
 ### OOP Concepts Demonstrated
-- **Abstraction**: `PipelineStage` serves as an abstract base class (`abc.ABC`) defining the required `process(data: Dict[str, Any]) -> Dict[str, Any]` interface contract.
-- **Encapsulation**: Each stage class encapsulates its internal configuration parameters (`_title_required`, `_default_completed`, `_status_label`) and processing logic while maintaining dictionary immutability (`data.copy()`).
-- **Inheritance**: Concrete stages (`TaskValidationStage`, `TaskTransformationStage`, `TaskProcessingStage`) inherit directly from `PipelineStage`.
-- **Polymorphism**: The `Pipeline` class executes any stage implementing `PipelineStage` uniformly, allowing stages to be interchanged or customized dynamically.
+- **Abstraction**: `Step` establishes a strict processing contract (`process`) without revealing execution details.
+- **Encapsulation**: Steps encapsulate configuration via protected attributes (`_title_required`, `_default_completed`, `_status_label`) and maintain input immutability via `data.copy()`.
+- **Inheritance**: Shallow inheritance tree where concrete steps inherit directly from `Step` without intermediate classes.
+- **Polymorphism**: `Pipeline` invokes `.process()` uniformly on all step instances without type checks (`if isinstance(...)` is strictly avoided).
 
-### Purpose of PipelineStage & Task Pipeline Stages
-1. **`PipelineStage`**: Abstract base class establishing a consistent blueprint for all processing stages.
-2. **`TaskValidationStage`**: Validates task input structure and task title length (1–100 chars), reusing `validate_task_title`.
-3. **`TaskTransformationStage`**: Normalizes task title whitespace and ensures default completion status (`completed=False`).
-4. **`TaskProcessingStage`**: Enriches task data with processing metadata (`status="PROCESSED"`, `processed=True`).
-
-### Sequential Execution in `Pipeline` Class
-The `Pipeline` class maintains an ordered list of `PipelineStage` objects. When `run(data)` is invoked, it iterates through the stages sequentially, passing the output of stage $i$ as the input to stage $i+1$, returning the final processed result.
-
-### Benefits of Class-Based Stage Separation
-- **Single Responsibility Principle (SRP)**: Each stage performs one specific data processing task.
-- **Reusability & Interchangeability**: Stages can be reused in different pipelines or swapped out independently.
-- **Maintainability**: Stages can be modified or tested in isolation without affecting other pipeline components.
 
 ## Setup & Installation
 

@@ -1,28 +1,39 @@
-from typing import Any, Dict, List, Optional
-from app.services.pipeline_stages import PipelineStage
+from typing import Any, Dict, List, Optional, Union
+from app.services.pipeline_stages import Step
 
 
 class Pipeline:
-    """Reusable data processing pipeline executing stages sequentially."""
+    """Reusable data processing pipeline composed of interchangeable Step objects."""
 
-    def __init__(self, stages: Optional[List[PipelineStage]] = None):
-        self._stages: List[PipelineStage] = []
-        if stages:
-            for stage in stages:
-                self.add_stage(stage)
+    def __init__(self, *args: Union[Step, List[Step]], steps: Optional[List[Step]] = None):
+        self._steps: List[Step] = []
+        if steps is not None:
+            for step in steps:
+                self.add_step(step)
+        for arg in args:
+            if isinstance(arg, list):
+                for step in arg:
+                    self.add_step(step)
+            else:
+                self.add_step(arg)
 
     @property
-    def stages(self) -> List[PipelineStage]:
-        return list(self._stages)
+    def steps(self) -> List[Step]:
+        return list(self._steps)
 
-    def add_stage(self, stage: PipelineStage) -> "Pipeline":
-        if not isinstance(stage, PipelineStage):
-            raise TypeError("Stage must be an instance of PipelineStage.")
-        self._stages.append(stage)
+    def add_step(self, step: Step) -> "Pipeline":
+        if not isinstance(step, Step):
+            raise TypeError("Step must be an instance of Step.")
+        self._steps.append(step)
         return self
+
+    def add_stage(self, stage: Step) -> "Pipeline":
+        """Alias for add_step for backward compatibility."""
+        return self.add_step(stage)
 
     def run(self, data: Dict[str, Any]) -> Dict[str, Any]:
         current_data = data.copy() if isinstance(data, dict) else data
-        for stage in self._stages:
-            current_data = stage.process(current_data)
+        for step in self._steps:
+            current_data = step.process(current_data)
         return current_data
+

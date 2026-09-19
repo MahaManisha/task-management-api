@@ -3,17 +3,17 @@ from typing import Any, Dict
 from app.utils.validators import validate_task_title
 
 
-class PipelineStage(ABC):
-    """Abstract base class for pipeline processing stages."""
+class Step(ABC):
+    """Abstract base class establishing the interface for pipeline steps."""
 
     @abstractmethod
     def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process input data and return transformed data."""
+        """Process input data dictionary and return the transformed data dictionary."""
         pass
 
 
-class TaskValidationStage(PipelineStage):
-    """Pipeline stage that validates task data fields."""
+class TaskValidationStep(Step):
+    """Pipeline step that validates task data fields."""
 
     def __init__(self, title_required: bool = True):
         self._title_required = title_required
@@ -32,8 +32,8 @@ class TaskValidationStage(PipelineStage):
         return data.copy()
 
 
-class TaskTransformationStage(PipelineStage):
-    """Pipeline stage that normalizes and formats task data."""
+class TaskTransformationStep(Step):
+    """Pipeline step that normalizes and formats task data."""
 
     def __init__(self, default_completed: bool = False):
         self._default_completed = default_completed
@@ -54,8 +54,8 @@ class TaskTransformationStage(PipelineStage):
         return transformed
 
 
-class TaskProcessingStage(PipelineStage):
-    """Pipeline stage that enriches task data with processing metadata."""
+class TaskProcessingStep(Step):
+    """Pipeline step that enriches task data with processing metadata."""
 
     def __init__(self, status_label: str = "PROCESSED"):
         self._status_label = status_label
@@ -68,3 +68,11 @@ class TaskProcessingStage(PipelineStage):
         processed["status"] = self._status_label
         processed["processed"] = True
         return processed
+
+
+# Backward compatibility aliases
+PipelineStage = Step
+TaskValidationStage = TaskValidationStep
+TaskTransformationStage = TaskTransformationStep
+TaskProcessingStage = TaskProcessingStep
+
