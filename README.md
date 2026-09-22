@@ -44,11 +44,13 @@ task-management-api/
 │       ├── helpers.py
 │       ├── decorators.py
 │       ├── context_managers.py
-│       └── cache.py
+│       ├── cache.py
+│       └── exceptions.py
 │
 ├── scripts/
 │   ├── config_validation_demo.py
-│   └── decorators_demo.py
+│   ├── decorators_demo.py
+│   └── exceptions_demo.py
 │
 ├── tests/
 │   ├── __init__.py
@@ -59,7 +61,8 @@ task-management-api/
 │   ├── test_config.py
 │   ├── test_decorators.py
 │   ├── test_context_manager.py
-│   └── test_cache.py
+│   ├── test_cache.py
+│   └── test_exceptions.py
 │
 ├── requirements.txt
 ├── .gitignore
@@ -116,6 +119,12 @@ Monolithic single-file applications become difficult to test, maintain, and scal
    - `get_pipeline_step_config`: Deterministic pipeline configuration lookup with `functools.lru_cache`.
    - `scripts/decorators_demo.py`: Executable demonstration script.
    - `tests/test_decorators.py`, `tests/test_context_manager.py`, `tests/test_cache.py`: Comprehensive unit tests.
+
+9. **D6 — Exception Hierarchies & Error Design (`app/utils/exceptions.py`, `scripts/exceptions_demo.py`, `tests/test_exceptions.py`)**:
+   - `TaskManagementError`: Project-level base exception.
+   - `DataValidationError`, `ConfigError`, `ProcessingError`: Domain-specific exception subclasses.
+   - `scripts/exceptions_demo.py`: Executable demonstration script showing exception hierarchies and chaining.
+   - `tests/test_exceptions.py`: Comprehensive unit tests verifying error design requirements.
 
 ## D3 — OOP for Pipelines: Composition Over Inheritance
 
@@ -257,8 +266,53 @@ Run the interactive D5 feature demonstration:
 python scripts/decorators_demo.py
 ```
 
+## D6 — Exception Hierarchies & Error Design
+
+### Overview
+D6 establishes a domain-specific exception hierarchy (`app/utils/exceptions.py`), layer-specific error translation, structured error messages (WHAT/WHERE/WHY), explicit exception chaining (`raise ... from ...`), and `try/except/else/finally` control flow.
+
+### Exception Hierarchy
+- **`TaskManagementError`**: Project-level base exception inheriting from standard `Exception`. Catching `TaskManagementError` polymorphically handles any domain failure across the application.
+- **`DataValidationError`**: Subclass of `TaskManagementError` (and `ValueError`) raised when input payload or task data violates validation constraints.
+- **`ConfigError`**: Subclass of `TaskManagementError` (and `ValueError`) raised when application or pipeline configuration initialization fails.
+- **`ProcessingError`**: Subclass of `TaskManagementError` (and `RuntimeError`) raised during data transformation or file resource execution failures.
+- **Why Domain Exceptions Are Useful**: Standard Python exceptions like `ValueError` or `RuntimeError` are generic. Domain-specific exceptions allow caller code to distinguish between domain rule failures and lower-level Python runtime bugs.
+
+### Layer Responsibility
+Each architectural layer is responsible for detecting failures and raising appropriate domain exceptions:
+- **Validation Layer** (`TaskValidationStep`): Raises `DataValidationError` when task title format or presence checks fail.
+- **Configuration Layer** (`app/config.py`): Converts lower-level Pydantic `ValidationError` into `ConfigError` via `load_pipeline_config`.
+- **Processing Layer** (`TaskBatchFileStep`, `ReliableTaskFetcherStep`): Converts I/O errors or network retries exhaustion into `ProcessingError`.
+
+### Exception Chaining
+- **Syntax (`raise NewException(...) from original_exception`)**: Converts low-level errors into domain-specific exceptions while preserving the original cause.
+- **Preserving Original Cause (`__cause__`)**: Setting `__cause__` ensures lower-level tracebacks (e.g. `OSError` or Pydantic `ValidationError`) remain accessible for debugging and logging without hiding failure context.
+
+### `try / except / else / finally` Control Flow
+- **`try`**: Encapsulates operations that may fail (e.g., file opening).
+- **`except`**: Catches expected low-level exceptions and raises domain-specific exceptions.
+- **`else`**: Executes business logic strictly when no exception occurs inside the `try` block.
+- **`finally`**: Guarantees resource cleanup (closing file handles) regardless of whether an exception occurred.
+
+### Avoiding Bare Except
+- **Why Bare Except (`except:`) is Dangerous**: Catching all exceptions blindly catches system signals (`KeyboardInterrupt`, `SystemExit`) and masks unexpected runtime bugs, causing silent failures.
+- **Best Practice**: Catch specific exception types explicitly (`except OSError as err:`). Production application code contains zero bare `except:` statements.
+
+### Error Message Design (WHAT / WHERE / WHY)
+Every domain exception message explicitly includes:
+- **WHAT**: What operation failed?
+- **WHERE**: Which component or step failed?
+- **WHY**: Why did the failure occur?
+*Example*: `"TaskValidationStep: task title is missing or invalid; title is required and must be between 1 and 100 characters."`
+
+### Running D6 Demonstration Script
+Run the interactive D6 exception demonstration:
+```bash
+python scripts/exceptions_demo.py
+```
+
 ### Running Complete Test Suite
-Run all unit tests across D1–D5:
+Run all unit tests across D1–D6:
 ```bash
 python -m unittest discover tests -v
 ```

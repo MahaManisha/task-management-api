@@ -2,8 +2,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Union
-from pydantic import BaseModel, Field, field_validator, ValidationInfo
+from pydantic import BaseModel, Field, ValidationError, field_validator, ValidationInfo
 from pydantic_settings import BaseSettings
+from app.utils.exceptions import ConfigError
 
 
 class Settings(BaseSettings):
@@ -82,6 +83,14 @@ class PipelineConfig(BaseModel):
         if not (0.0 <= v <= 1.0):
             raise ValueError("confidence_threshold must be between 0.0 and 1.0")
         return v
+
+
+def load_pipeline_config(**kwargs) -> PipelineConfig:
+    """Load and validate PipelineConfig, converting Pydantic ValidationError into domain ConfigError."""
+    try:
+        return PipelineConfig(**kwargs)
+    except ValidationError as err:
+        raise ConfigError("PipelineConfig: configuration initialization failed; invalid arguments provided.") from err
 
 
 @dataclass
