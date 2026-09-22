@@ -45,12 +45,14 @@ task-management-api/
 │       ├── decorators.py
 │       ├── context_managers.py
 │       ├── cache.py
-│       └── exceptions.py
+│       ├── exceptions.py
+│       └── logging_config.py
 │
 ├── scripts/
 │   ├── config_validation_demo.py
 │   ├── decorators_demo.py
-│   └── exceptions_demo.py
+│   ├── exceptions_demo.py
+│   └── logging_demo.py
 │
 ├── tests/
 │   ├── __init__.py
@@ -62,7 +64,8 @@ task-management-api/
 │   ├── test_decorators.py
 │   ├── test_context_manager.py
 │   ├── test_cache.py
-│   └── test_exceptions.py
+│   ├── test_exceptions.py
+│   └── test_logging.py
 │
 ├── requirements.txt
 ├── .gitignore
@@ -125,6 +128,12 @@ Monolithic single-file applications become difficult to test, maintain, and scal
    - `DataValidationError`, `ConfigError`, `ProcessingError`: Domain-specific exception subclasses.
    - `scripts/exceptions_demo.py`: Executable demonstration script showing exception hierarchies and chaining.
    - `tests/test_exceptions.py`: Comprehensive unit tests verifying error design requirements.
+
+10. **D7 — Structured Logging & Production Debugging (`app/utils/logging_config.py`, `scripts/logging_demo.py`, `tests/test_logging.py`)**:
+    - `JSONFormatter`: Standard library JSON logger formatter.
+    - `configure_logging`: Centralized logging configuration supporting development (plain text console) and production (structured JSON console + file) modes.
+    - `scripts/logging_demo.py`: Executable demonstration script demonstrating structured pipeline logging and traceback context.
+    - `tests/test_logging.py`: Comprehensive unit test suite verifying zero print statements, traceback logging, and handler deduplication.
 
 ## D3 — OOP for Pipelines: Composition Over Inheritance
 
@@ -233,7 +242,7 @@ D5 introduces pythonic production utility patterns including higher-order functi
   def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
       ...
   ```
-- **Logging**: Logs function name and duration using `logging.getLogger(__name__)` (e.g. `Function 'process' executed in 0.000123 seconds`). Does not use `print()` statements and propagates exceptions unchanged.
+- **Logging**: Logs function name and duration using `logging.getLogger(__name__)` with `duration_ms` metadata. Does not use `print()` statements and propagates exceptions unchanged.
 
 ### `@retry(max_attempts=N)`
 - **Purpose**: Retries transiently failing functions automatically up to `max_attempts`.
@@ -311,8 +320,76 @@ Run the interactive D6 exception demonstration:
 python scripts/exceptions_demo.py
 ```
 
+## D7 — Structured Logging & Production Debugging
+
+### Overview
+D7 introduces standard-library structured logging (`app/utils/logging_config.py`), environment-specific formatting (plain console logs in Development, JSON logs in Production), persistent file logging, complete pipeline lifecycle instrumentation, and traceback context preservation via `logger.exception()`.
+
+### Python Logging Architecture
+- **Standard Library `logging`**: Built entirely using Python's stdlib `logging` module without third-party logging dependencies.
+- **Centralized Configuration (`configure_logging`)**: Handlers are managed centrally on root/app loggers and deduplicated to prevent duplicate log messages.
+- **Loggers**: `app` (application domain), `app.services.pipeline` (pipeline lifecycle), `app.utils.decorators` (timing & retries), `scripts` (demo runners).
+
+### Development vs Production Logging Modes
+- **Development Mode (`environment="development"`)**:
+  - Console handler formats log events as human-readable plain text: `2026-09-22 18:30:00 [INFO] app.services.pipeline: Pipeline execution started`.
+- **Production Mode (`environment="production"`)**:
+  - Console handler formats log events as single-line, machine-readable structured JSON strings.
+
+### Structured JSON Logging (`JSONFormatter`)
+In Production or File Logging mode, logs are serialized as JSON objects containing standard and contextual key-value fields:
+- `timestamp`: UTC timestamp in ISO 8601 format (`2026-09-22T18:30:00.123456+00:00`).
+- `level`: Log severity level (`DEBUG`, `INFO`, `WARNING`, `ERROR`).
+- `logger`: Originating logger name.
+- `message`: Human-readable description.
+- `environment`: Active deployment environment (`development`, `production`, `test`).
+- `event`: Event categorization tag (e.g. `pipeline_start`, `step_complete`, `pipeline_failure`).
+- `step`: Active pipeline step name.
+- `duration_ms`: Step or pipeline execution time in milliseconds.
+- `record_count` / `file_count`: Operational record metadata.
+- **Masked Secrets**: Sensitive fields (containing `password`, `token`, `secret`, `api_key`) are automatically masked as `"***MASKED***"`.
+
+### Log Levels
+- `DEBUG`: Detailed diagnostic checks (e.g., title presence checks in `TaskValidationStep`).
+- `INFO`: Pipeline and step execution lifecycle events (`pipeline_start`, `step_complete`, `pipeline_complete`).
+- `WARNING`: Recoverable failures and transient retry attempts in `@retry`.
+- `ERROR` / `EXCEPTION`: Step processing failures and pipeline execution aborts.
+
+### File Logging & Persisted Logs
+- When `log_file` is specified (e.g., `configure_logging(log_file="logs/pipeline.log")`), structured JSON logs are written to a persistent file.
+- **Log File Path**: `logs/pipeline.log`.
+
+### Exception Traceback Handling (`logger.exception()`)
+When unexpected failures occur during pipeline execution, `logger.exception()` captures the complete stack trace and embeds it in the `"exception"` key of the JSON log output:
+```json
+{
+  "timestamp": "2026-09-22T18:30:00.123456+00:00",
+  "level": "ERROR",
+  "logger": "app.services.pipeline",
+  "message": "Pipeline execution failed at step 'ReliableTaskFetcherStep': ReliableTaskFetcherStep: transient fetching failure...",
+  "event": "pipeline_failure",
+  "step": "ReliableTaskFetcherStep",
+  "error_type": "ProcessingError",
+  "exception": "Traceback (most recent call last):\n  File ...\nProcessingError: ..."
+}
+```
+
+### Why Structured Logging Helps Production Debugging
+Structured JSON logs allow log aggregation tools (e.g. Datadog, ELK Stack, CloudWatch) to index, query, filter, and alert on specific fields (such as `event="pipeline_failure"`, `step="ReliableTaskFetcherStep"`, or `duration_ms > 500`) without relying on complex regular expressions.
+
+### Running D7 Logging Demonstration Script
+Run the interactive D7 logging demonstration:
+```bash
+python scripts/logging_demo.py
+```
+This script runs both a successful pipeline and a deliberately failing pipeline, persisting JSON logs to `logs/pipeline.log`.
+
 ### Running Complete Test Suite
-Run all unit tests across D1–D6:
+Run all unit tests across D1–D7 using `pytest` or `unittest`:
+```bash
+pytest
+```
+or:
 ```bash
 python -m unittest discover tests -v
 ```
@@ -347,7 +424,7 @@ pip install -r requirements.txt
 
 Run the unit test suite:
 ```bash
-python -m unittest discover tests -v
+pytest
 ```
 
 ## Running the Application
