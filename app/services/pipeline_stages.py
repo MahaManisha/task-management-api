@@ -5,6 +5,7 @@ from app.utils.validators import validate_task_title
 from app.utils.decorators import timeit, retry
 from app.utils.context_managers import PipelineResourceContext
 from app.utils.cache import get_pipeline_step_config
+from app.utils.exceptions import DataValidationError, ProcessingError
 
 
 class Step(ABC):
@@ -28,14 +29,18 @@ class TaskValidationStep(Step):
 
     def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            raise TypeError("Input data must be a dictionary.")
+            raise TypeError("TaskValidationStep: input payload is not a dictionary; dictionary input is required.")
 
         title = data.get("title")
         if self._title_required:
             if not title or not validate_task_title(title):
-                raise ValueError("Task title is required and must be between 1 and 100 characters.")
+                raise DataValidationError(
+                    "TaskValidationStep: task title is missing or invalid; title is required and must be between 1 and 100 characters."
+                )
         elif title is not None and not validate_task_title(title):
-            raise ValueError("Task title must be between 1 and 100 characters.")
+            raise DataValidationError(
+                "TaskValidationStep: task title format is invalid; title must be between 1 and 100 characters."
+            )
 
         return data.copy()
 
@@ -52,7 +57,7 @@ class TaskTransformationStep(Step):
 
     def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            raise TypeError("Input data must be a dictionary.")
+            raise TypeError("TaskTransformationStep: input payload is not a dictionary; dictionary input is required.")
 
         transformed = data.copy()
         if "title" in transformed and isinstance(transformed["title"], str):
@@ -79,7 +84,7 @@ class TaskProcessingStep(Step):
     @timeit
     def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            raise TypeError("Input data must be a dictionary.")
+            raise TypeError("TaskProcessingStep: input payload is not a dictionary; dictionary input is required.")
 
         processed = data.copy()
         processed["status"] = self._status_label
@@ -88,27 +93,39 @@ class TaskProcessingStep(Step):
 
 
 class TaskBatchFileStep(Step):
-    """Pipeline step using a resource context manager to write batch records safely."""
+    """Pipeline step using a resource context manager and try/except/else/finally to write batch records safely."""
 
-    def __init__(self, batch_file_path: Union[str, Path]):
+    def __init__(self, batch_file_path: Union[str, Path], simulate_io_error: bool = False):
         self._batch_file_path = Path(batch_file_path)
+        self._simulate_io_error = simulate_io_error
 
     def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            raise TypeError("Input data must be a dictionary.")
+            raise TypeError("TaskBatchFileStep: input payload is not a dictionary; dictionary input is required.")
 
         out_data = data.copy()
-        with PipelineResourceContext(resource_name="TaskBatchWriter", file_path=self._batch_file_path) as ctx:
-            if ctx._file_handle:
-                title = out_data.get("title", "Untitled")
-                ctx._file_handle.write(f"BATCH RECORD: {title}\n")
-                out_data["batch_logged"] = True
+        file_handle = None
+        try:
+            if self._simulate_io_error:
+                raise OSError("Disk full or permission denied")
+            file_handle = open(self._batch_file_path, "a+", encoding="utf-8")
+        except OSError as err:
+            raise ProcessingError(
+                f"TaskBatchFileStep: failed to access batch file '{self._batch_file_path.name}'; filesystem I/O operation failed."
+            ) from err
+        else:
+            title = out_data.get("title", "Untitled")
+            file_handle.write(f"BATCH RECORD: {title}\n")
+            out_data["batch_logged"] = True
+        finally:
+            if file_handle and not file_handle.closed:
+                file_handle.close()
 
         return out_data
 
 
 class ReliableTaskFetcherStep(Step):
-    """Pipeline step demonstrating @retry logic for unreliable network or data operations."""
+    """Pipeline step demonstrating @retry logic and ProcessingError for unreliable network or data operations."""
 
     def __init__(self, max_attempts: int = 3, fail_count: int = 0):
         self._max_attempts = max_attempts
@@ -118,11 +135,13 @@ class ReliableTaskFetcherStep(Step):
     @retry(max_attempts=3)
     def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            raise TypeError("Input data must be a dictionary.")
+            raise TypeError("ReliableTaskFetcherStep: input payload is not a dictionary; dictionary input is required.")
 
         self._attempts_made += 1
         if self._attempts_made <= self._fail_count:
-            raise RuntimeError(f"Simulated transient error on attempt {self._attempts_made}")
+            raise ProcessingError(
+                f"ReliableTaskFetcherStep: transient fetching failure on attempt {self._attempts_made}; remote service unavailable."
+            )
 
         result = data.copy()
         result["fetcher_attempts"] = self._attempts_made
