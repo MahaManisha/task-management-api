@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any, Dict
 
 from app.services.pipeline import Pipeline
@@ -7,6 +9,8 @@ from app.services.pipeline_stages import (
     TaskValidationStep,
     TaskTransformationStep,
     TaskProcessingStep,
+    TaskBatchFileStep,
+    ReliableTaskFetcherStep,
 )
 
 
@@ -145,3 +149,25 @@ class TestPipeline(unittest.TestCase):
         with self.assertRaises(TypeError):
             pipeline.add_step("not_a_step")
 
+    def test_d5_pipeline_integration_batch_file_context_manager(self):
+        """Verify TaskBatchFileStep (using context manager) works seamlessly in Pipeline."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            batch_path = Path(temp_dir) / "pipeline_batch.txt"
+            pipeline = Pipeline(
+                TaskValidationStep(),
+                TaskBatchFileStep(batch_file_path=batch_path),
+            )
+            res = pipeline.run({"title": "Batch Managed Task"})
+            self.assertTrue(res.get("batch_logged"))
+            self.assertTrue(batch_path.exists())
+            self.assertIn("BATCH RECORD: Batch Managed Task", batch_path.read_text(encoding="utf-8"))
+
+    def test_d5_pipeline_integration_reliable_fetcher_retry(self):
+        """Verify ReliableTaskFetcherStep (using @retry) retries and succeeds in Pipeline."""
+        pipeline = Pipeline(
+            ReliableTaskFetcherStep(max_attempts=3, fail_count=2),
+            TaskValidationStep(),
+        )
+        res = pipeline.run({"title": "Retryable Task"})
+        self.assertEqual(res["fetcher_attempts"], 3)
+        self.assertEqual(res["title"], "Retryable Task")
