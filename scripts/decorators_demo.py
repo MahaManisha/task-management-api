@@ -1,3 +1,4 @@
+import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -8,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.utils.decorators import timeit, retry
 from app.utils.context_managers import PipelineResourceContext, managed_pipeline_file
 from app.utils.cache import get_pipeline_step_config
+from app.utils.logging_config import configure_logging
 from app.services.pipeline import Pipeline
 from app.services.pipeline_stages import (
     TaskValidationStep,
@@ -17,15 +19,17 @@ from app.services.pipeline_stages import (
     ReliableTaskFetcherStep,
 )
 
+logger = configure_logging(environment="development")
+
 
 def run_demo():
-    print("=" * 75)
-    print(" D5: DECORATORS, CONTEXT MANAGERS & CACHING DEMONSTRATION")
-    print("=" * 75)
+    logger.info("=" * 75)
+    logger.info(" D5: DECORATORS, CONTEXT MANAGERS & CACHING DEMONSTRATION")
+    logger.info("=" * 75)
 
     # 1. @timeit Decorator Demo
-    print("\n1. @timeit DECORATOR DEMONSTRATION")
-    print("-" * 50)
+    logger.info("1. @timeit DECORATOR DEMONSTRATION")
+    logger.info("-" * 50)
 
     @timeit
     def compute_heavy_task(n: int) -> int:
@@ -33,14 +37,14 @@ def run_demo():
         return sum(i * i for i in range(n))
 
     result = compute_heavy_task(100_000)
-    print(f"Function Name     : {compute_heavy_task.__name__}")
-    print(f"Function Doc      : {compute_heavy_task.__doc__}")
-    print(f"Function Result   : {result}")
-    print("  -> Logged execution duration using standard Python logging.")
+    logger.info(f"Function Name     : {compute_heavy_task.__name__}")
+    logger.info(f"Function Doc      : {compute_heavy_task.__doc__}")
+    logger.info(f"Function Result   : {result}")
+    logger.info("  -> Logged execution duration using standard Python logging.")
 
     # 2. @retry Decorator Demo
-    print("\n2. @retry(max_attempts=N) DECORATOR DEMONSTRATION")
-    print("-" * 50)
+    logger.info("2. @retry(max_attempts=N) DECORATOR DEMONSTRATION")
+    logger.info("-" * 50)
 
     attempts_count = 0
 
@@ -53,12 +57,12 @@ def run_demo():
             raise ConnectionError(f"Transient error (attempt {attempts_count})")
         return "SUCCESS_DATA"
 
-    print("Executing unreliable operation (max_attempts=3)...")
+    logger.info("Executing unreliable operation (max_attempts=3)...")
     res = unreliable_operation()
-    print(f"Final Result      : {res}")
-    print(f"Attempts Needed   : {attempts_count}")
+    logger.info(f"Final Result      : {res}")
+    logger.info(f"Attempts Needed   : {attempts_count}")
 
-    print("\nExecuting operation that always fails (max_attempts=2)...")
+    logger.info("Executing operation that always fails (max_attempts=2)...")
     @retry(max_attempts=2)
     def failing_operation():
         raise ValueError("Permanent failure")
@@ -66,54 +70,54 @@ def run_demo():
     try:
         failing_operation()
     except ValueError as e:
-        print(f"Caught Final Exception as expected: {e}")
+        logger.info(f"Caught Final Exception as expected: {e}")
 
     # 3. Context Manager Demo
-    print("\n3. RESOURCE CONTEXT MANAGER DEMONSTRATION")
-    print("-" * 50)
+    logger.info("3. RESOURCE CONTEXT MANAGER DEMONSTRATION")
+    logger.info("-" * 50)
     with tempfile.TemporaryDirectory() as temp_dir:
         sample_path = Path(temp_dir) / "demo_resource.txt"
-        print(f"Managing resource at: {sample_path.name}")
+        logger.info(f"Managing resource at: {sample_path.name}")
 
-        print("Entering context block...")
+        logger.info("Entering context block...")
         with PipelineResourceContext(resource_name="DemoResource", file_path=sample_path) as ctx:
-            print(f"  Inside context, is_acquired={ctx.is_acquired}")
+            logger.info(f"  Inside context, is_acquired={ctx.is_acquired}")
             if ctx._file_handle:
                 ctx._file_handle.write("Resource Data Line\n")
 
-        print(f"Exited context block, is_acquired={ctx.is_acquired}")
+        logger.info(f"Exited context block, is_acquired={ctx.is_acquired}")
 
-        print("\nDemonstrating cleanup upon exception inside context block...")
+        logger.info("Demonstrating cleanup upon exception inside context block...")
         try:
             with PipelineResourceContext(resource_name="ExceptionResource") as ctx:
-                print(f"  Inside context, is_acquired={ctx.is_acquired}")
+                logger.info(f"  Inside context, is_acquired={ctx.is_acquired}")
                 raise RuntimeError("Simulated error inside context")
         except RuntimeError as err:
-            print(f"  Caught Exception: {err}")
-            print(f"  After Exception, is_acquired={ctx.is_acquired}")
+            logger.info(f"  Caught Exception: {err}")
+            logger.info(f"  After Exception, is_acquired={ctx.is_acquired}")
 
     # 4. lru_cache Caching Demo
-    print("\n4. CACHING WITH lru_cache DEMONSTRATION")
-    print("-" * 50)
+    logger.info("4. CACHING WITH lru_cache DEMONSTRATION")
+    logger.info("-" * 50)
     get_pipeline_step_config.cache_clear()
 
-    print("Initial Call (Cache Miss):")
+    logger.info("Initial Call (Cache Miss):")
     cfg1 = get_pipeline_step_config("TaskValidationStep", "production")
-    print(f"  Config Result : {cfg1}")
-    print(f"  Cache Stats   : {get_pipeline_step_config.cache_info()}")
+    logger.info(f"  Config Result : {cfg1}")
+    logger.info(f"  Cache Stats   : {get_pipeline_step_config.cache_info()}")
 
-    print("\nSecond Call with Same Arguments (Cache Hit):")
+    logger.info("Second Call with Same Arguments (Cache Hit):")
     cfg2 = get_pipeline_step_config("TaskValidationStep", "production")
-    print(f"  Config Result : {cfg2}")
-    print(f"  Cache Stats   : {get_pipeline_step_config.cache_info()}")
+    logger.info(f"  Config Result : {cfg2}")
+    logger.info(f"  Cache Stats   : {get_pipeline_step_config.cache_info()}")
 
-    print("\nClearing Cache...")
+    logger.info("Clearing Cache...")
     get_pipeline_step_config.cache_clear()
-    print(f"  Cache Stats after clear : {get_pipeline_step_config.cache_info()}")
+    logger.info(f"  Cache Stats after clear : {get_pipeline_step_config.cache_info()}")
 
     # 5. Full Pipeline Integration Demo
-    print("\n5. ACTUAL PIPELINE INTEGRATION DEMONSTRATION")
-    print("-" * 50)
+    logger.info("5. ACTUAL PIPELINE INTEGRATION DEMONSTRATION")
+    logger.info("-" * 50)
     with tempfile.TemporaryDirectory() as temp_dir:
         batch_file = Path(temp_dir) / "pipeline_batch.txt"
         pipeline = Pipeline(
@@ -125,14 +129,14 @@ def run_demo():
         )
 
         input_data = {"title": "   Integrated D5 Pipeline Task   "}
-        print(f"Input Task Data  : {input_data}")
+        logger.info(f"Input Task Data  : {input_data}")
         output_data = pipeline.run(input_data)
-        print(f"Output Task Data : {output_data}")
-        print(f"Batch File Saved : {batch_file.exists()}")
+        logger.info(f"Output Task Data : {output_data}")
+        logger.info(f"Batch File Saved : {batch_file.exists()}")
 
-    print("=" * 75)
-    print(" DEMO COMPLETED SUCCESSFULLY")
-    print("=" * 75)
+    logger.info("=" * 75)
+    logger.info(" DEMO COMPLETED SUCCESSFULLY")
+    logger.info("=" * 75)
 
 
 if __name__ == "__main__":
