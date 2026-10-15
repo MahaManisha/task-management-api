@@ -11,7 +11,12 @@ from app.services.pipeline_stages import (
     TaskProcessingStep,
     TaskBatchFileStep,
     ReliableTaskFetcherStep,
+    resolve_step_param,
+    validate_task_payload,
+    format_batch_record,
+    write_batch_record,
 )
+from app.utils.exceptions import DataValidationError
 
 
 class TaskTaggingStep(Step):
@@ -171,3 +176,116 @@ class TestPipeline(unittest.TestCase):
         res = pipeline.run({"title": "Retryable Task"})
         self.assertEqual(res["fetcher_attempts"], 3)
         self.assertEqual(res["title"], "Retryable Task")
+
+    def test_resolve_step_param_priority_and_fallback(self):
+        """Verify resolve_step_param prioritizes explicit values, then cached config, then default."""
+        # 1. Explicit value overrides cached config
+        explicit_res = resolve_step_param("TaskValidationStep", "title_required", False, default=True)
+        self.assertFalse(explicit_res)
+
+        # 2. None explicit value uses cached config
+        cached_res = resolve_step_param("TaskValidationStep", "title_required", None, default=False)
+        self.assertTrue(cached_res)
+
+        # 3. Missing parameter returns fallback default
+        fallback_res = resolve_step_param("UnknownStep", "non_existent_key", None, default="FALLBACK")
+        self.assertEqual(fallback_res, "FALLBACK")
+
+    def test_validate_task_payload_helper(self):
+        """Verify validate_task_payload enforces title presence and length constraints."""
+        # Valid payload passes
+        validate_task_payload({"title": "Valid Task Title"}, title_required=True)
+
+        # Missing title when required raises DataValidationError
+        with self.assertRaises(DataValidationError) as cm1:
+            validate_task_payload({"title": ""}, title_required=True)
+        self.assertIn("task title is missing or invalid", str(cm1.exception))
+
+        # Title exceeding max length raises DataValidationError
+        with self.assertRaises(DataValidationError) as cm2:
+            validate_task_payload({"title": "x" * 105}, title_required=True)
+        self.assertIn("must be between 1 and 100 characters", str(cm2.exception))
+
+        # None title when optional passes
+        validate_task_payload({"title": None}, title_required=False)
+
+    def test_format_batch_record_helper(self):
+        """Verify format_batch_record produces consistent batch line output."""
+        formatted = format_batch_record("Deploy Task Management API")
+        self.assertEqual(formatted, "BATCH RECORD: Deploy Task Management API\n")
+
+    def test_write_batch_record_helper_and_simulated_io_error(self):
+        """Verify write_batch_record writes via context manager and propagates simulated I/O errors."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = Path(temp_dir) / "helper_batch.txt"
+            record = "BATCH RECORD: Helper Test\n"
+
+            # Normal write
+            write_batch_record(file_path, record, simulate_io_error=False)
+            self.assertTrue(file_path.exists())
+            self.assertEqual(file_path.read_text(encoding="utf-8"), record)
+
+            # Simulated I/O error
+            with self.assertRaises(OSError) as cm:
+                write_batch_record(file_path, record, simulate_io_error=True)
+            self.assertIn("Disk full or permission denied", str(cm.exception))
+
+    def test_step_validate_payload_method(self):
+        """Verify base Step._validate_payload accepts dicts and rejects non-dicts with informative error."""
+        step = TaskValidationStep()
+
+        # Valid dict returns itself
+        valid_dict = {"key": "value"}
+        self.assertEqual(step._validate_payload(valid_dict), valid_dict)
+
+        # Non-dict raises TypeError identifying the step
+        with self.assertRaises(TypeError) as cm:
+            step._validate_payload(["not", "a", "dict"])
+        self.assertIn("TaskValidationStep: input payload is not a dictionary", str(cm.exception))
+
+    def test_extensibility_custom_preprocessing_and_audit_steps_without_modifying_pipeline(self):
+        """Demonstrate adding custom preprocessing and postprocessing steps without modifying Pipeline."""
+        execution_order = []
+
+        class TaskSanitizationStep(Step):
+            """Custom preprocessing step sanitizing title to titlecase."""
+            def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
+                self._validate_payload(data)
+                execution_order.append("sanitize")
+                result = data.copy()
+                raw_title = result.get("title", "")
+                result["title"] = raw_title.strip().title()
+                result["sanitized"] = True
+                return result
+
+        class TaskAuditStep(Step):
+            """Custom postprocessing step adding an audit verification stamp."""
+            def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
+                self._validate_payload(data)
+                execution_order.append("audit")
+                result = data.copy()
+                result["audit_verified"] = True
+                return result
+
+        # Compose pipeline with custom preprocessing, built-in stages, and custom postprocessing
+        pipeline = Pipeline(
+            TaskSanitizationStep(),
+            TaskValidationStep(),
+            TaskTransformationStep(default_completed=False),
+            TaskProcessingStep(status_label="EXTENDED_STAGE"),
+            TaskAuditStep(),
+        )
+
+        input_payload = {"title": "  clean code solid refactoring  "}
+        output = pipeline.run(input_payload)
+
+        # Verify execution order was preserved
+        self.assertEqual(execution_order, ["sanitize", "audit"])
+
+        # Verify all transformations occurred in order without modifying Pipeline orchestration
+        self.assertEqual(output["title"], "Clean Code Solid Refactoring")
+        self.assertTrue(output["sanitized"])
+        self.assertFalse(output["completed"])
+        self.assertEqual(output["status"], "EXTENDED_STAGE")
+        self.assertTrue(output["processed"])
+        self.assertTrue(output["audit_verified"])

@@ -23,6 +23,12 @@ class PipelineResourceContext:
             self._file_handle = open(self.file_path, "a+", encoding="utf-8")
         return self
 
+    def write(self, text: str) -> int:
+        """Write text to the acquired file handle."""
+        if not self.is_acquired or self._file_handle is None or self._file_handle.closed:
+            raise RuntimeError(f"Cannot write to unacquired resource '{self.resource_name}'.")
+        return self._file_handle.write(text)
+
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         try:
             if self._file_handle and not self._file_handle.closed:

@@ -460,3 +460,27 @@ cp .env.example .env
 
 ### Security Warning
 > **IMPORTANT**: Never commit real secrets, API keys, passwords, or `.env` files to Git repositories. Ensure `.env` remains listed in `.gitignore` at all times.
+
+## Internship Notebooks
+
+The `notebooks/` directory contains submission-ready Jupyter notebooks demonstrating the technical implementations of tasks D1 through D7 based strictly on the actual project codebase:
+
+1. [`D1_Environment_Setup.ipynb`](file:///notebooks/D1_Environment_Setup.ipynb): Environment setup, project structure, FastAPI app initialization, and ASGI endpoint verification.
+2. [`D2_Iterators_Generators_Memory.ipynb`](file:///notebooks/D2_Iterators_Generators_Memory.ipynb): Custom iterators (`FileBatchIterator`), generators (`read_files_in_batches`), eager vs lazy loading, and peak memory benchmarks.
+3. [`D3_OOP_Pipeline_Composition.ipynb`](file:///notebooks/D3_OOP_Pipeline_Composition.ipynb): Abstract base step (`Step`), concrete pipeline stages, composition over inheritance, and dynamic runtime step replacement.
+4. [`D4_Type_Hints_Pydantic_Configuration.ipynb`](file:///notebooks/D4_Type_Hints_Pydantic_Configuration.ipynb): Strong type annotations, Pydantic `BaseModel` / `BaseSettings`, validators, enumerations, dataclass comparisons, and domain `ConfigError` handling.
+5. [`D5_Decorators_Context_Managers_Caching.ipynb`](file:///notebooks/D5_Decorators_Context_Managers_Caching.ipynb): Custom decorators (`@timeit`, `@retry`), context managers (`PipelineTimer`, `temp_file_context`), and function response caching (`lru_cache`).
+6. [`D6_Exception_Hierarchy_Error_Design.ipynb`](file:///notebooks/D6_Exception_Hierarchy_Error_Design.ipynb): Custom exception hierarchy (`TaskManagementError`), domain exception mapping, defensive `try/except` patterns, and explicit exception chaining (`raise ... from ...`).
+7. [`D7_Structured_Logging_Debugging.ipynb`](file:///notebooks/D7_Structured_Logging_Debugging.ipynb): Centralized logging configuration, development plain-text vs production JSON logging (`JSONFormatter`), sensitive data masking, and full exception traceback logging.
+
+## D8 — Clean Code & SOLID Refactoring
+
+The repository has been refactored following clean code practices and SOLID design principles without altering existing behavior:
+
+- **Single Responsibility Principle (SRP)**: Separated multi-responsibility concerns in `TaskBatchFileStep` (record formatting, safe file writing, step orchestration) and `TaskValidationStep` (payload validation rules).
+- **Open/Closed Principle (OCP)**: Verified pipeline extensibility, demonstrating custom preprocessing and audit stages integrate seamlessly without modifying `Pipeline` orchestration logic.
+- **Dependency Inversion Principle (DIP)**: Decoupled `TaskBatchFileStep` from low-level `open()` calls by delegating resource acquisition and cleanup to `PipelineResourceContext`.
+- **Don't Repeat Yourself (DRY)**: Eliminated repeated payload type assertions across all pipeline steps via `Step._validate_payload()` and centralized configuration parameter fallback via `resolve_step_param()`.
+- **Clean Code**: Resolved Pydantic v2 `BaseSettings` deprecation warnings using `SettingsConfigDict` and encapsulated context manager write access.
+
+For detailed analysis, principle mappings, before/after architecture breakdown, and verification results, see [`REFACTOR_NOTES.md`](file:///REFACTOR_NOTES.md).
