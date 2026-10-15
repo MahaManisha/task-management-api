@@ -34,18 +34,38 @@ task-management-api/
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── user_service.py
-│   │   └── task_service.py
+│   │   ├── task_service.py
+│   │   ├── pipeline.py
+│   │   └── pipeline_stages.py
 │   │
 │   └── utils/
 │       ├── __init__.py
 │       ├── validators.py
-│       └── helpers.py
+│       ├── helpers.py
+│       ├── decorators.py
+│       ├── context_managers.py
+│       ├── cache.py
+│       ├── exceptions.py
+│       └── logging_config.py
+│
+├── scripts/
+│   ├── config_validation_demo.py
+│   ├── decorators_demo.py
+│   ├── exceptions_demo.py
+│   └── logging_demo.py
 │
 ├── tests/
 │   ├── __init__.py
 │   ├── test_users.py
 │   ├── test_tasks.py
-│   └── test_validators.py
+│   ├── test_validators.py
+│   ├── test_pipeline.py
+│   ├── test_config.py
+│   ├── test_decorators.py
+│   ├── test_context_manager.py
+│   ├── test_cache.py
+│   ├── test_exceptions.py
+│   └── test_logging.py
 │
 ├── requirements.txt
 ├── .gitignore
@@ -82,6 +102,298 @@ Monolithic single-file applications become difficult to test, maintain, and scal
 5. **Lightweight Entry Point (`app/main.py`)**:
    - `app/main.py` serves strictly as the HTTP routing layer. It defines FastAPI endpoints, parses HTTP request payloads, delegates business logic directly to `user_service` and `task_service`, and maps exceptions to HTTP error status codes. Keeping `main.py` lightweight ensures that business logic remains decoupled from HTTP framework specifics.
 
+6. **D3 — Pipeline & Object-Oriented Architecture (`app/services/pipeline.py`, `app/services/pipeline_stages.py`)**:
+   - `Step`: Abstract base class enforcing step processing contract (`process`).
+   - `TaskValidationStep`, `TaskTransformationStep`, `TaskProcessingStep`: Concrete step implementations.
+   - `Pipeline`: Sequential step execution engine using composition over inheritance.
+   - `tests/test_pipeline.py`: Comprehensive test suite verifying step interchangeability, runtime swapping, and extensibility.
+
+7. **D4 — Type Hints & Pydantic for Configuration (`app/config.py`, `scripts/config_validation_demo.py`, `tests/test_config.py`)**:
+   - `PipelineConfig`: Pydantic `BaseModel` enforcing runtime validation for pipeline settings.
+   - `ExecutionMode`, `ExecutionDevice`: Enums restricting execution choices.
+   - `ImageSize`: Nested Pydantic model validating pixel dimensions.
+   - `DataclassPipelineConfig`: Standard Python dataclass demonstrating the contrast between static types and Pydantic runtime validation.
+   - `scripts/config_validation_demo.py`: Executable demo script showing valid vs invalid configuration validation errors.
+   - `tests/test_config.py`: Unit test suite verifying runtime configuration validation.
+
+8. **D5 — Decorators, Context Managers & Caching (`app/utils/decorators.py`, `app/utils/context_managers.py`, `app/utils/cache.py`)**:
+   - `@timeit`, `@retry`: Reusable custom decorators for performance logging and automated failure retries.
+   - `PipelineResourceContext`, `managed_pipeline_file`: Context managers ensuring guaranteed resource acquisition and cleanup.
+   - `get_pipeline_step_config`: Deterministic pipeline configuration lookup with `functools.lru_cache`.
+   - `scripts/decorators_demo.py`: Executable demonstration script.
+   - `tests/test_decorators.py`, `tests/test_context_manager.py`, `tests/test_cache.py`: Comprehensive unit tests.
+
+9. **D6 — Exception Hierarchies & Error Design (`app/utils/exceptions.py`, `scripts/exceptions_demo.py`, `tests/test_exceptions.py`)**:
+   - `TaskManagementError`: Project-level base exception.
+   - `DataValidationError`, `ConfigError`, `ProcessingError`: Domain-specific exception subclasses.
+   - `scripts/exceptions_demo.py`: Executable demonstration script showing exception hierarchies and chaining.
+   - `tests/test_exceptions.py`: Comprehensive unit tests verifying error design requirements.
+
+10. **D7 — Structured Logging & Production Debugging (`app/utils/logging_config.py`, `scripts/logging_demo.py`, `tests/test_logging.py`)**:
+    - `JSONFormatter`: Standard library JSON logger formatter.
+    - `configure_logging`: Centralized logging configuration supporting development (plain text console) and production (structured JSON console + file) modes.
+    - `scripts/logging_demo.py`: Executable demonstration script demonstrating structured pipeline logging and traceback context.
+    - `tests/test_logging.py`: Comprehensive unit test suite verifying zero print statements, traceback logging, and handler deduplication.
+
+## D3 — OOP for Pipelines: Composition Over Inheritance
+
+### Overview
+D3 implements Object-Oriented Programming (OOP) principles to construct a flexible task processing pipeline (`app/services/pipeline.py` & `app/services/pipeline_stages.py`) using **Composition Over Inheritance**. The `Pipeline` class contains interchangeable `Step` objects that execute sequentially.
+
+### Data Flow
+Data flows sequentially through discrete steps, where the output of one step serves directly as input to the next:
+
+```text
+Task Input → Step 1 → Step 2 → Step 3 → Output
+```
+
+### Purpose of Step Interface & Task Steps
+1. **`Step`**: Abstract base class (`abc.ABC`) defining the shared `process(data: Dict[str, Any]) -> Dict[str, Any]` interface with `@abstractmethod`. Direct instantiation is prevented.
+2. **`TaskValidationStep`**: Validates task title presence and length (1–100 chars), reusing `validate_task_title`.
+3. **`TaskTransformationStep`**: Normalizes task title whitespace and ensures default completion status (`completed=False`).
+4. **`TaskProcessingStep`**: Enriches task data with processing metadata (`status="PROCESSED"`, `processed=True`).
+
+### Composition Over Inheritance
+- **Composition (`has-a`)**: The `Pipeline` class maintains a collection of `Step` objects (`self._steps`). It does not inherit from `Step` nor do steps inherit from `Pipeline`.
+- **Why Avoid Deep Inheritance Chains?**: Deep inheritance hierarchies create tight coupling, brittle code, and unintended side-effects when parent classes change. Composition keeps steps decoupled and independent.
+- **Runtime Step Swapping**: Because `Pipeline` interacts only with the abstract `Step` interface, any `Step` can be swapped for another at runtime without modifying the `Pipeline` class:
+  ```python
+  # Pipeline A uses TaskTransformationStep
+  pipeline_a = Pipeline(validation_step, transform_step, process_step)
+  
+  # Pipeline B swaps transform_step with priority_step at runtime
+  pipeline_b = Pipeline(validation_step, priority_step, process_step)
+  ```
+- **Extensibility Without Modification**: Adding a new step (e.g. `TaskTaggingStep` or `TaskPriorityStep`) requires creating a new subclass of `Step` and adding it to the pipeline using `pipeline.add_step(TaskTaggingStep())`. The `Pipeline` class implementation remains 100% untouched.
+
+### OOP Concepts Demonstrated
+- **Abstraction**: `Step` establishes a strict processing contract (`process`) without revealing execution details.
+- **Encapsulation**: Steps encapsulate configuration via protected attributes (`_title_required`, `_default_completed`, `_status_label`) and maintain input immutability via `data.copy()`.
+- **Inheritance**: Shallow inheritance tree where concrete steps inherit directly from `Step` without intermediate classes.
+- **Polymorphism**: `Pipeline` invokes `.process()` uniformly on all step instances without type checks (`if isinstance(...)` is strictly avoided).
+
+## D4 — Type Hints & Pydantic for Configuration
+
+### Overview
+D4 introduces runtime configuration validation using **Pydantic v2** (`app/config.py`), modern Python type hints, Enums, and a comparative demonstration against standard Python `@dataclass`.
+
+### Static Type Hints vs Runtime Validation
+- **Static Type Hints**: Tools like IDEs and `mypy` use type hints (`str`, `int`, `Optional[str]`, `list[str]`) during development for auto-completion and static analysis. However, standard Python type hints are **not** enforced at execution time.
+- **Runtime Validation**: **Pydantic** evaluates data dynamic upon object instantiation (`PipelineConfig(**data)`). If input values break constraints (e.g. wrong type, out-of-range value, non-existent path), Pydantic immediately raises a detailed `ValidationError`.
+
+### Dataclass vs Pydantic Runtime Validation
+- **Python `@dataclass`**: Provides a concise way to create structured Python data containers. However, standard dataclasses **do not** validate field types or values when instantiated. Invalid parameters (e.g. `batch_size=-100`) pass silently.
+- **Pydantic `BaseModel`**: Performs strict runtime type coercion and validator check evaluation (`@field_validator`) at creation time, rejecting invalid states immediately.
+
+### Pipeline Configuration Fields & Rules
+| Field | Type | Default | Validation Rules |
+| :--- | :--- | :--- | :--- |
+| `input_path` | `Path` | *Required* | Must exist on the filesystem (`Path.exists()`). |
+| `batch_size` | `int` | `32` | Must be an integer greater than zero (`batch_size > 0`). |
+| `image_size` | `ImageSize` | `224x224` | Width & height must be positive integers (`> 0`). |
+| `feature_columns` | `list[str]` | `["title", "description", "status"]` | Must contain at least one column string. |
+| `mode` | `ExecutionMode` (Enum) | `INFERENCE` | Must be one of `TRAIN`, `VALIDATE`, or `INFERENCE`. |
+| `device` | `ExecutionDevice` (Enum) | `CPU` | Must be one of `CPU`, `CUDA`, or `MPS`. |
+| `confidence_threshold` | `float` | `0.8` | Float value bounded strictly between `0.0` and `1.0`. |
+
+### Deliberately Invalid Configuration Examples
+Pydantic produces clear, specific validation error messages indicating **WHAT** is invalid, **WHERE** the problem is located, and **WHY** it was rejected:
+
+1. **Non-existent Path**:
+   - `WHERE`: Field `input_path`
+   - `WHY`: `Value error, input_path does not exist: 'non_existent_folder_xyz'`
+2. **Invalid Batch Size**:
+   - `WHERE`: Field `batch_size`
+   - `WHY`: `Value error, batch_size must be greater than 0`
+3. **Out-of-Range Threshold**:
+   - `WHERE`: Field `confidence_threshold`
+   - `WHY`: `Value error, confidence_threshold must be between 0.0 and 1.0`
+4. **Invalid Enum Choice**:
+   - `WHERE`: Field `mode`
+   - `WHY`: `Input should be 'TRAIN', 'VALIDATE' or 'INFERENCE'`
+
+### Running D4 Configuration Demo
+Run the interactive validation demonstration script:
+```bash
+python scripts/config_validation_demo.py
+```
+
+### Running D4 Configuration Tests
+Run the configuration unit tests:
+```bash
+python -m unittest tests/test_config.py -v
+```
+
+## D5 — Decorators, Context Managers & Caching
+
+### Overview
+D5 introduces pythonic production utility patterns including higher-order function decorators, parameterized execution control, strict resource management via context managers, and bounded in-memory caching with `functools.lru_cache`.
+
+### Decorators
+- **What Decorators Are**: Decorators are higher-order functions that take a function object as an argument, extend or modify its execution behavior, and return a callable wrapper function.
+- **Function Wrapping & `functools.wraps`**: When a function is wrapped by a decorator, its intrinsic metadata (`__name__`, `__doc__`, annotations) is replaced by the wrapper function. `functools.wraps(func)` copies the original metadata onto the wrapper function, preserving introspectability and debugging clarity.
+- **Parameterized Decorators**: Decorators accepting arguments (e.g., `@retry(max_attempts=3)`) use a three-tier nested closure structure: the outer function receives arguments, the inner function receives the target callable, and the innermost wrapper executes the logic.
+
+### `@timeit`
+- **Purpose**: Measures and logs the precise execution wall-clock time of any function or method.
+- **Usage**:
+  ```python
+  @timeit
+  def process(self, data: Dict[str, Any]) -> Dict[str, Any]:
+      ...
+  ```
+- **Logging**: Logs function name and duration using `logging.getLogger(__name__)` with `duration_ms` metadata. Does not use `print()` statements and propagates exceptions unchanged.
+
+### `@retry(max_attempts=N)`
+- **Purpose**: Retries transiently failing functions automatically up to `max_attempts`.
+- **Validation**: Enforces that `max_attempts` is an integer strictly greater than zero (`> 0`); invalid types or values raise `TypeError` or `ValueError`.
+- **Behavior**: Catches exceptions during execution attempts, logs warning messages with attempt numbers, returns immediately upon success, and re-raises the final exception if all `max_attempts` are exhausted.
+
+### Context Managers
+- **Protocol (`__enter__` & `__exit__`)**: Classes implementing `__enter__` (acquire resource) and `__exit__` (release resource) form context managers used via `with` statements.
+- **`contextlib.contextmanager`**: A decorator allowing generator functions using `try...finally` blocks to act as lightweight context managers.
+- **Why Resource Cleanup Belongs in Context Managers**: The `__exit__` method or `finally` block is guaranteed to execute even if code inside the `with` block raises an exception. This prevents resource leaks (open file descriptors, lingering network sockets, or unreleased locks).
+
+### Caching
+- **`functools.lru_cache`**: Caches function call return values based on input arguments using a Least Recently Used (LRU) eviction strategy.
+- **Cache Hits & Misses**: Repeated calls with identical arguments return cached results instantly in $O(1)$ time without re-executing function logic.
+- **`cache_info()` & `cache_clear()`**: `.cache_info()` reports hit/miss counts and current size; `.cache_clear()` clears cached entries.
+- **Bounded Caching (`maxsize=128`)**: Specifying a bounded `maxsize` prevents unbounded RAM consumption compared to unlimited caching (`maxsize=None`).
+- **Stale Data & Invalidation**: If underlying data or configuration changes at runtime, cached results become stale. Callers must invoke `cache_clear()` to force cache invalidation.
+- **Dangers of Caching Mutable Data**: Functions returning mutable lists or dictionaries return reference handles to cached objects. If a caller mutates the returned object, the cached state is mutated for all future callers across the application! Therefore, cached functions should return immutable structures or read-only views.
+
+### Pipeline Integration
+D5 features are directly integrated into the project's D3 Pipeline architecture (`app/services/pipeline_stages.py`):
+1. **`TaskProcessingStep.process`**: Wrapped with `@timeit` to log stage execution timing automatically.
+2. **`ReliableTaskFetcherStep`**: Uses `@retry(max_attempts=3)` to handle transient errors when fetching task data.
+3. **`TaskBatchFileStep`**: Employs `PipelineResourceContext` inside its `process` method to safely manage writing batch records to file resources.
+4. **`TaskValidationStep` & `TaskTransformationStep`**: Consume `get_pipeline_step_config` (backed by `@lru_cache`) to load deterministic step configuration parameters.
+
+### Running D5 Demonstration Script
+Run the interactive D5 feature demonstration:
+```bash
+python scripts/decorators_demo.py
+```
+
+## D6 — Exception Hierarchies & Error Design
+
+### Overview
+D6 establishes a domain-specific exception hierarchy (`app/utils/exceptions.py`), layer-specific error translation, structured error messages (WHAT/WHERE/WHY), explicit exception chaining (`raise ... from ...`), and `try/except/else/finally` control flow.
+
+### Exception Hierarchy
+- **`TaskManagementError`**: Project-level base exception inheriting from standard `Exception`. Catching `TaskManagementError` polymorphically handles any domain failure across the application.
+- **`DataValidationError`**: Subclass of `TaskManagementError` (and `ValueError`) raised when input payload or task data violates validation constraints.
+- **`ConfigError`**: Subclass of `TaskManagementError` (and `ValueError`) raised when application or pipeline configuration initialization fails.
+- **`ProcessingError`**: Subclass of `TaskManagementError` (and `RuntimeError`) raised during data transformation or file resource execution failures.
+- **Why Domain Exceptions Are Useful**: Standard Python exceptions like `ValueError` or `RuntimeError` are generic. Domain-specific exceptions allow caller code to distinguish between domain rule failures and lower-level Python runtime bugs.
+
+### Layer Responsibility
+Each architectural layer is responsible for detecting failures and raising appropriate domain exceptions:
+- **Validation Layer** (`TaskValidationStep`): Raises `DataValidationError` when task title format or presence checks fail.
+- **Configuration Layer** (`app/config.py`): Converts lower-level Pydantic `ValidationError` into `ConfigError` via `load_pipeline_config`.
+- **Processing Layer** (`TaskBatchFileStep`, `ReliableTaskFetcherStep`): Converts I/O errors or network retries exhaustion into `ProcessingError`.
+
+### Exception Chaining
+- **Syntax (`raise NewException(...) from original_exception`)**: Converts low-level errors into domain-specific exceptions while preserving the original cause.
+- **Preserving Original Cause (`__cause__`)**: Setting `__cause__` ensures lower-level tracebacks (e.g. `OSError` or Pydantic `ValidationError`) remain accessible for debugging and logging without hiding failure context.
+
+### `try / except / else / finally` Control Flow
+- **`try`**: Encapsulates operations that may fail (e.g., file opening).
+- **`except`**: Catches expected low-level exceptions and raises domain-specific exceptions.
+- **`else`**: Executes business logic strictly when no exception occurs inside the `try` block.
+- **`finally`**: Guarantees resource cleanup (closing file handles) regardless of whether an exception occurred.
+
+### Avoiding Bare Except
+- **Why Bare Except (`except:`) is Dangerous**: Catching all exceptions blindly catches system signals (`KeyboardInterrupt`, `SystemExit`) and masks unexpected runtime bugs, causing silent failures.
+- **Best Practice**: Catch specific exception types explicitly (`except OSError as err:`). Production application code contains zero bare `except:` statements.
+
+### Error Message Design (WHAT / WHERE / WHY)
+Every domain exception message explicitly includes:
+- **WHAT**: What operation failed?
+- **WHERE**: Which component or step failed?
+- **WHY**: Why did the failure occur?
+*Example*: `"TaskValidationStep: task title is missing or invalid; title is required and must be between 1 and 100 characters."`
+
+### Running D6 Demonstration Script
+Run the interactive D6 exception demonstration:
+```bash
+python scripts/exceptions_demo.py
+```
+
+## D7 — Structured Logging & Production Debugging
+
+### Overview
+D7 introduces standard-library structured logging (`app/utils/logging_config.py`), environment-specific formatting (plain console logs in Development, JSON logs in Production), persistent file logging, complete pipeline lifecycle instrumentation, and traceback context preservation via `logger.exception()`.
+
+### Python Logging Architecture
+- **Standard Library `logging`**: Built entirely using Python's stdlib `logging` module without third-party logging dependencies.
+- **Centralized Configuration (`configure_logging`)**: Handlers are managed centrally on root/app loggers and deduplicated to prevent duplicate log messages.
+- **Loggers**: `app` (application domain), `app.services.pipeline` (pipeline lifecycle), `app.utils.decorators` (timing & retries), `scripts` (demo runners).
+
+### Development vs Production Logging Modes
+- **Development Mode (`environment="development"`)**:
+  - Console handler formats log events as human-readable plain text: `2026-09-22 18:30:00 [INFO] app.services.pipeline: Pipeline execution started`.
+- **Production Mode (`environment="production"`)**:
+  - Console handler formats log events as single-line, machine-readable structured JSON strings.
+
+### Structured JSON Logging (`JSONFormatter`)
+In Production or File Logging mode, logs are serialized as JSON objects containing standard and contextual key-value fields:
+- `timestamp`: UTC timestamp in ISO 8601 format (`2026-09-22T18:30:00.123456+00:00`).
+- `level`: Log severity level (`DEBUG`, `INFO`, `WARNING`, `ERROR`).
+- `logger`: Originating logger name.
+- `message`: Human-readable description.
+- `environment`: Active deployment environment (`development`, `production`, `test`).
+- `event`: Event categorization tag (e.g. `pipeline_start`, `step_complete`, `pipeline_failure`).
+- `step`: Active pipeline step name.
+- `duration_ms`: Step or pipeline execution time in milliseconds.
+- `record_count` / `file_count`: Operational record metadata.
+- **Masked Secrets**: Sensitive fields (containing `password`, `token`, `secret`, `api_key`) are automatically masked as `"***MASKED***"`.
+
+### Log Levels
+- `DEBUG`: Detailed diagnostic checks (e.g., title presence checks in `TaskValidationStep`).
+- `INFO`: Pipeline and step execution lifecycle events (`pipeline_start`, `step_complete`, `pipeline_complete`).
+- `WARNING`: Recoverable failures and transient retry attempts in `@retry`.
+- `ERROR` / `EXCEPTION`: Step processing failures and pipeline execution aborts.
+
+### File Logging & Persisted Logs
+- When `log_file` is specified (e.g., `configure_logging(log_file="logs/pipeline.log")`), structured JSON logs are written to a persistent file.
+- **Log File Path**: `logs/pipeline.log`.
+
+### Exception Traceback Handling (`logger.exception()`)
+When unexpected failures occur during pipeline execution, `logger.exception()` captures the complete stack trace and embeds it in the `"exception"` key of the JSON log output:
+```json
+{
+  "timestamp": "2026-09-22T18:30:00.123456+00:00",
+  "level": "ERROR",
+  "logger": "app.services.pipeline",
+  "message": "Pipeline execution failed at step 'ReliableTaskFetcherStep': ReliableTaskFetcherStep: transient fetching failure...",
+  "event": "pipeline_failure",
+  "step": "ReliableTaskFetcherStep",
+  "error_type": "ProcessingError",
+  "exception": "Traceback (most recent call last):\n  File ...\nProcessingError: ..."
+}
+```
+
+### Why Structured Logging Helps Production Debugging
+Structured JSON logs allow log aggregation tools (e.g. Datadog, ELK Stack, CloudWatch) to index, query, filter, and alert on specific fields (such as `event="pipeline_failure"`, `step="ReliableTaskFetcherStep"`, or `duration_ms > 500`) without relying on complex regular expressions.
+
+### Running D7 Logging Demonstration Script
+Run the interactive D7 logging demonstration:
+```bash
+python scripts/logging_demo.py
+```
+This script runs both a successful pipeline and a deliberately failing pipeline, persisting JSON logs to `logs/pipeline.log`.
+
+### Running Complete Test Suite
+Run all unit tests across D1–D7 using `pytest` or `unittest`:
+```bash
+pytest
+```
+or:
+```bash
+python -m unittest discover tests -v
+```
+
 ## Setup & Installation
 
 ### 1. Prerequisites
@@ -112,7 +424,7 @@ pip install -r requirements.txt
 
 Run the unit test suite:
 ```bash
-python -m unittest discover tests
+pytest
 ```
 
 ## Running the Application
@@ -148,3 +460,27 @@ cp .env.example .env
 
 ### Security Warning
 > **IMPORTANT**: Never commit real secrets, API keys, passwords, or `.env` files to Git repositories. Ensure `.env` remains listed in `.gitignore` at all times.
+
+## Internship Notebooks
+
+The `notebooks/` directory contains submission-ready Jupyter notebooks demonstrating the technical implementations of tasks D1 through D7 based strictly on the actual project codebase:
+
+1. [`D1_Environment_Setup.ipynb`](file:///notebooks/D1_Environment_Setup.ipynb): Environment setup, project structure, FastAPI app initialization, and ASGI endpoint verification.
+2. [`D2_Iterators_Generators_Memory.ipynb`](file:///notebooks/D2_Iterators_Generators_Memory.ipynb): Custom iterators (`FileBatchIterator`), generators (`read_files_in_batches`), eager vs lazy loading, and peak memory benchmarks.
+3. [`D3_OOP_Pipeline_Composition.ipynb`](file:///notebooks/D3_OOP_Pipeline_Composition.ipynb): Abstract base step (`Step`), concrete pipeline stages, composition over inheritance, and dynamic runtime step replacement.
+4. [`D4_Type_Hints_Pydantic_Configuration.ipynb`](file:///notebooks/D4_Type_Hints_Pydantic_Configuration.ipynb): Strong type annotations, Pydantic `BaseModel` / `BaseSettings`, validators, enumerations, dataclass comparisons, and domain `ConfigError` handling.
+5. [`D5_Decorators_Context_Managers_Caching.ipynb`](file:///notebooks/D5_Decorators_Context_Managers_Caching.ipynb): Custom decorators (`@timeit`, `@retry`), context managers (`PipelineTimer`, `temp_file_context`), and function response caching (`lru_cache`).
+6. [`D6_Exception_Hierarchy_Error_Design.ipynb`](file:///notebooks/D6_Exception_Hierarchy_Error_Design.ipynb): Custom exception hierarchy (`TaskManagementError`), domain exception mapping, defensive `try/except` patterns, and explicit exception chaining (`raise ... from ...`).
+7. [`D7_Structured_Logging_Debugging.ipynb`](file:///notebooks/D7_Structured_Logging_Debugging.ipynb): Centralized logging configuration, development plain-text vs production JSON logging (`JSONFormatter`), sensitive data masking, and full exception traceback logging.
+
+## D8 — Clean Code & SOLID Refactoring
+
+The repository has been refactored following clean code practices and SOLID design principles without altering existing behavior:
+
+- **Single Responsibility Principle (SRP)**: Separated multi-responsibility concerns in `TaskBatchFileStep` (record formatting, safe file writing, step orchestration) and `TaskValidationStep` (payload validation rules).
+- **Open/Closed Principle (OCP)**: Verified pipeline extensibility, demonstrating custom preprocessing and audit stages integrate seamlessly without modifying `Pipeline` orchestration logic.
+- **Dependency Inversion Principle (DIP)**: Decoupled `TaskBatchFileStep` from low-level `open()` calls by delegating resource acquisition and cleanup to `PipelineResourceContext`.
+- **Don't Repeat Yourself (DRY)**: Eliminated repeated payload type assertions across all pipeline steps via `Step._validate_payload()` and centralized configuration parameter fallback via `resolve_step_param()`.
+- **Clean Code**: Resolved Pydantic v2 `BaseSettings` deprecation warnings using `SettingsConfigDict` and encapsulated context manager write access.
+
+For detailed analysis, principle mappings, before/after architecture breakdown, and verification results, see [`REFACTOR_NOTES.md`](file:///REFACTOR_NOTES.md).
