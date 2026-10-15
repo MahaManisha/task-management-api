@@ -3,7 +3,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Union
 from pydantic import BaseModel, Field, ValidationError, field_validator, ValidationInfo
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from app.utils.exceptions import ConfigError
 
 
@@ -14,9 +14,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
     DEBUG: bool = True
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()
